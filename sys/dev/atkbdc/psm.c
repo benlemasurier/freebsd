@@ -219,6 +219,7 @@ typedef struct synapticsinfo {
 	int			 vscroll_min_delta;
 	int			 vscroll_div_min;
 	int			 vscroll_div_max;
+	int			 vscroll_natural;
 	int			 touchpad_off;
 	int			 softbuttons_y;
 	int			 softbutton2_x;
@@ -551,6 +552,7 @@ enum {
 	SYNAPTICS_SYSCTL_VSCROLL_MIN_DELTA =	SYN_OFFSET(vscroll_min_delta),
 	SYNAPTICS_SYSCTL_VSCROLL_DIV_MIN =	SYN_OFFSET(vscroll_div_min),
 	SYNAPTICS_SYSCTL_VSCROLL_DIV_MAX =	SYN_OFFSET(vscroll_div_max),
+	SYNAPTICS_SYSCTL_VSCROLL_NATURAL =	SYN_OFFSET(vscroll_natural),
 	SYNAPTICS_SYSCTL_TOUCHPAD_OFF =		SYN_OFFSET(touchpad_off),
 	SYNAPTICS_SYSCTL_SOFTBUTTONS_Y =	SYN_OFFSET(softbuttons_y),
 	SYNAPTICS_SYSCTL_SOFTBUTTON2_X =	SYN_OFFSET(softbutton2_x),
@@ -4009,6 +4011,7 @@ psmsmoother(struct psm_softc *sc, finger_t *f, int smoother_id,
 		int weight_current, weight_previous, weight_len_squared;
 		int div_min, div_max, div_len;
 		int vscroll_hor_area, vscroll_ver_area;
+		int vscroll_natural;
 		int two_finger_scroll;
 		int max_x, max_y;
 		int len, weight_prev_x, weight_prev_y;
@@ -4038,6 +4041,7 @@ psmsmoother(struct psm_softc *sc, finger_t *f, int smoother_id,
 		div_len = sc->syninfo.div_len;
 		vscroll_hor_area = sc->syninfo.vscroll_hor_area;
 		vscroll_ver_area = sc->syninfo.vscroll_ver_area;
+		vscroll_natural = sc->syninfo.vscroll_natural;
 		two_finger_scroll = sc->syninfo.two_finger_scroll;
 		max_x = sc->syninfo.max_x;
 		max_y = sc->syninfo.max_y;
@@ -4202,9 +4206,19 @@ psmsmoother(struct psm_softc *sc, finger_t *f, int smoother_id,
 			    smoother_id, dx, dy, dxp, dyp));
 			break;
 		case 1: /* Vertical scrolling. */
-			if (dyp != 0)
+			if (dyp == 0)
+				break;
+
+			if (vscroll_natural) {
 				ms->button |= (dyp > 0) ?
-				    MOUSE_BUTTON4DOWN : MOUSE_BUTTON5DOWN;
+					MOUSE_BUTTON5DOWN :
+					MOUSE_BUTTON4DOWN;
+			} else {
+				ms->button |= (dyp > 0) ?
+					MOUSE_BUTTON4DOWN :
+					MOUSE_BUTTON5DOWN;
+			}
+
 			break;
 		case 2: /* Horizontal scrolling. */
 			if (dxp != 0)
@@ -5581,6 +5595,10 @@ synaptics_sysctl(SYSCTL_HANDLER_ARGS)
 		if (arg < 1)
 			return (EINVAL);
 		break;
+	case SYNAPTICS_SYSCTL_VSCROLL_NATURAL:
+		if (arg < 0 || arg > 1)
+			return (EINVAL);
+		break;
 	case SYNAPTICS_SYSCTL_TAP_MAX_DELTA:
 	case SYNAPTICS_SYSCTL_TAPHOLD_TIMEOUT:
 	case SYNAPTICS_SYSCTL_VSCROLL_MIN_DELTA:
@@ -5985,6 +6003,15 @@ synaptics_sysctl_create_tree(struct psm_softc *sc, const char *name,
 	    sc, SYNAPTICS_SYSCTL_VSCROLL_DIV_MAX,
 	    synaptics_sysctl, "I",
 	    "Divisor for slow scrolling");
+
+	/* hw.psm.synaptics.vscroll_natural. */
+	sc->syninfo.vscroll_natural = 0;
+	SYSCTL_ADD_PROC(&sc->syninfo.sysctl_ctx,
+	    SYSCTL_CHILDREN(sc->syninfo.sysctl_tree), OID_AUTO,
+	    "vscroll_natural", CTLTYPE_INT|CTLFLAG_RW|CTLFLAG_ANYBODY,
+	    sc, SYNAPTICS_SYSCTL_VSCROLL_NATURAL,
+	    synaptics_sysctl, "I",
+	    "Synaptics natural virtual scrolling");
 
 	/* hw.psm.synaptics.touchpad_off. */
 	sc->syninfo.touchpad_off = 0;
@@ -6926,6 +6953,9 @@ elantech_init_synaptics(struct psm_softc *sc)
 		sc->syninfo.vscroll_min_delta = 15;
 		sc->syninfo.vscroll_div_min = 30;
 		sc->syninfo.vscroll_div_max = 50;
+
+		/* Natural virtual scroll disabled by default. */
+		sc->syninfo.vscroll_natural = 0;
 
 		/* Set bottom quarter as 42% - 16% - 42% sized softbuttons */
 		if (sc->elanhw.isclickpad) {
